@@ -127,3 +127,114 @@ class ExampleQWidget(QWidget):
 
     def _on_click(self):
         print("napari has", len(self.viewer.layers), "layers")
+
+from magicgui import magicgui
+import numpy as np
+from napari.viewer import Viewer
+from napari.types import ImageData
+from .fourier_analysis import analyze_pixel_signal, theoretical2
+
+
+def fourier_phase_analysis_widget():
+    @magicgui(call_button="Run Fourier Phase Analysis")
+    def widget(image: ImageData, viewer: Viewer):
+        if image.ndim != 3:
+            raise ValueError("Expected 3D image: (time, y, x)")
+        image = image[:180,:,:]
+        t = np.linspace(0, 2 * np.pi, image.shape[0])
+        h, w = image.shape[1:]
+        signals = image.reshape(image.shape[0], -1).T
+
+        r2_map = np.zeros((h * w,))
+        phase_map = np.full((h * w,), np.nan)
+        dom_map = np.zeros((h * w,))
+        mag_rel_map = np.zeros((h * w,))
+        arm_map = np.full((h * w,), np.nan)
+
+        for i, signal in enumerate(signals):
+            result = analyze_pixel_signal(signal, t)
+            r2_map[i] = result["r2"]
+            phase_map[i] = result["phase"] if result["phase"] is not None else np.nan
+            dom_map[i] = result["dominant"]
+            mag_rel_map[i] = result["mag_rel"]
+            arm_map[i] = result["arm"] if result["arm"] is not None else np.nan
+
+        viewer.add_image(phase_map.reshape(h, w), name="Phase Map", colormap="hsv")
+        viewer.add_image(r2_map.reshape(h, w), name="R² Map", colormap="magma")
+        viewer.add_image(dom_map.reshape(h, w), name="Dominant Freq", colormap="viridis")
+        viewer.add_image(mag_rel_map.reshape(h, w), name="Rel Magnitude", colormap="plasma")
+        viewer.add_image(arm_map.reshape(h, w), name="Arm Angle", colormap="twilight")
+
+    return widget
+
+from magicgui import magicgui
+import numpy as np
+import matplotlib.pyplot as plt
+from napari.types import ImageData
+from napari.viewer import Viewer
+from .fourier_analysis import analyze_pixel_signal
+
+
+def single_pixel_analysis_widget():
+    @magicgui(
+        call_button="Analyze Pixel FFT",
+        x={"widget_type": "SpinBox", "min": 0, "max": 512},
+        y={"widget_type": "SpinBox", "min": 0, "max": 512},
+        #max_time={"widget_type": "SpinBox", "min": 0, "max": 360, "value": 180},
+    )
+    def widget(image: ImageData, x: int = 0, y: int = 0, viewer: Viewer = None):
+        import dask.array as da
+        def theoretical(a_0,a_4,phi,alpha):
+            return a_0 + a_4 * np.cos(2*(3*phi - 2 * alpha) )
+
+        def theoretical2(a_0,a_4,phi,alpha):
+            return a_0 + a_4 * np.cos(2*(3*phi + 2 * alpha))
+
+        def r_squared(signal, predicted):
+            ss_res = np.sum((signal - predicted)**2)
+            ss_tot = np.sum((signal - np.mean(signal))**2)
+            r_squared = 1 - (ss_res / ss_tot)
+            return r_squared
+
+        if isinstance(image, da.Array):
+            image = image.compute()
+
+        if image.ndim != 3:
+            raise ValueError("Expected 3D image: (time, y, x)")
+        signal = image[:180, y, x]
+        t = np.linspace(0, 2 * np.pi, signal.shape[0])
+        
+
+        # Debug info
+        print(f"Selected pixel: (x={x}, y={y})")
+        print(f"Signal shape: {signal.shape}, Time shape: {t.shape}")
+
+        result = analyze_pixel_signal(signal, t)
+        print("Result:", result)
+
+        # Plot signal and fitted model
+        a_0 = np.mean(signal)
+        a_4 = 2 * np.abs(np.fft.rfft(signal)[4]) / len(t)
+
+        fft_phase = np.mod(np.angle(np.fft.rfft(signal)[4]), 2 * np.pi) / 6
+        r_1 = r_squared(signal,theoretical(a_0, a_4,fft_phase, t))
+        r_2 = r_squared(signal,theoretical2(a_0, a_4,fft_phase, t))
+        if r_2>r_1:
+            fft_phase=np.abs(np.mod(fft_phase,2*np.pi)-2*np.pi)/6
+        
+        
+        if fft_phase is not None:
+            fitted = theoretical(a_0, a_4, fft_phase, t) 
+        else:
+            fitted = np.zeros_like(signal)
+
+        plt.figure()
+        plt.plot(t, signal, 'ko', label='Raw Signal')
+        plt.plot(t, fitted, 'r-', label='Fitted Model')
+        plt.title(f"Pixel ({x},{y}) - Phase: {fft_phase:.2f}°" if fft_phase else "No Fit")
+        plt.xlabel("t (rad)")
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+    return widget

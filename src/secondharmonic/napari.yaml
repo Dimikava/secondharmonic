@@ -9,6 +9,12 @@ contributions:
     - id: secondharmonic.get_reader
       python_name: secondharmonic._reader:napari_get_reader
       title: Open data with Analysis ultimate tool
+    - id: secondharmonic.single_pixel_analysis
+      title: Single Pixel Fourier Analysis
+      python_name: secondharmonic._widget:single_pixel_analysis_widget
+    - id: secondharmonic.fourier_phase_analysis
+      title: Fourier Phase Analysis
+      python_name: secondharmonic._widget:fourier_phase_analysis_widget
     - id: secondharmonic.write_multiple
       python_name: secondharmonic._writer:write_multiple
       title: Save multi-layer data with Analysis ultimate tool
@@ -46,6 +52,10 @@ contributions:
       display_name: Analysis ultimate tool
       key: unique_id.1
   widgets:
+    - command: secondharmonic.single_pixel_analysis
+      display_name: Single Pixel Fourier Analysis
+    - command: secondharmonic.fourier_phase_analysis
+      display_name: Fourier Phase Analysis
     - command: secondharmonic.make_container_widget
       display_name: Container Threshold
     - command: secondharmonic.make_magic_widget

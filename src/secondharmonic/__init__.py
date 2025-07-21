@@ -10,6 +10,8 @@ from ._widget import (
     ImageThreshold,
     threshold_autogenerate_widget,
     threshold_magic_widget,
+    fourier_phase_analysis_widget,
+    single_pixel_analysis_widget
 )
 from ._writer import write_multiple, write_single_image
 
@@ -22,4 +24,8 @@ __all__ = (
     "ImageThreshold",
     "threshold_autogenerate_widget",
     "threshold_magic_widget",
+    "fourier_phase_analysis_widget",
+    "single_pixel_analysis_widget"
+    
 )
+
