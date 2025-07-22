@@ -36,10 +36,13 @@ To install latest development version :
     pip install git+https://github.com/Dimikava/secondharmonic.git
 
 
+
 ## Contributing
 
 Contributions are very welcome. Tests can be run with [tox], please ensure
 the coverage at least stays the same before you submit a pull request.
+After cloning the repository, run `scripts/setup.sh` to create a virtual
+environment and install the development dependencies.
 
 ## License
 
