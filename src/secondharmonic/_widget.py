@@ -132,46 +132,103 @@ from magicgui import magicgui
 import numpy as np
 from napari.viewer import Viewer
 from napari.types import ImageData
-from .fourier_analysis import analyze_pixel_signal, theoretical2
+from napari.viewer import Viewer
+from scipy.fft import rfft
+from .fourier_analysis import theoretical, theoretical2
 
 
 def fourier_phase_analysis_widget():
+    """Return a widget that performs FFT phase analysis on the whole image.
+
+    The computation is fully vectorized: all pixel time series are transformed
+    with a single ``rfft`` call and metrics are derived using NumPy
+    broadcasting.
+    """
     @magicgui(call_button="Run Fourier Phase Analysis")
     def widget(image: ImageData, viewer: Viewer):
         if image.ndim != 3:
             raise ValueError("Expected 3D image: (time, y, x)")
-        image = image[:180,:,:]
+        image = image[:180]
         t = np.linspace(0, 2 * np.pi, image.shape[0])
         h, w = image.shape[1:]
-        signals = image.reshape(image.shape[0], -1).T
+        def r_squared_vec(obs: np.ndarray, pred: np.ndarray) -> np.ndarray:
+            ss_res = np.sum((obs - pred) ** 2, axis=0)
+            ss_tot = np.sum((obs - np.mean(obs, axis=0)) ** 2, axis=0)
+            return 1 - ss_res / ss_tot
 
-        r2_map = np.zeros((h * w,))
-        phase_map = np.full((h * w,), np.nan)
-        dom_map = np.zeros((h * w,))
-        mag_rel_map = np.zeros((h * w,))
-        arm_map = np.full((h * w,), np.nan)
+        fft_result = rfft(image, axis=0)
+        fft_phases = np.angle(fft_result)
 
-        for i, signal in enumerate(signals):
-            result = analyze_pixel_signal(signal, t)
-            r2_map[i] = result["r2"]
-            phase_map[i] = result["phase"] if result["phase"] is not None else np.nan
-            dom_map[i] = result["dominant"]
-            mag_rel_map[i] = result["mag_rel"]
-            arm_map[i] = result["arm"] if result["arm"] is not None else np.nan
+        a_0 = np.abs(fft_result[0]) / len(t)
+        a_4 = 2 * np.abs(fft_result[4]) / len(t)
+        phase = np.mod(fft_phases[4], 2 * np.pi) / 6
+        t_arr = t[:, None, None]
 
-        viewer.add_image(phase_map.reshape(h, w), name="Phase Map", colormap="hsv")
+        fit1 = theoretical(
+            a_0[None, ...], a_4[None, ...], phase[None, ...], t_arr
+        )
+        r1 = r_squared_vec(image, fit1)
+        fit2 = theoretical2(
+            a_0[None, ...], a_4[None, ...], phase[None, ...], t_arr
+        )
+        r2 = r_squared_vec(image, fit2)
+
+        alt_phase = np.abs(np.mod(fft_phases[4], 2 * np.pi) - 2 * np.pi) / 6
+        fit_alt = theoretical(
+            a_0[None, ...], a_4[None, ...], alt_phase[None, ...], t_arr
+        )
+        r_alt = r_squared_vec(image, fit_alt)
+
+        use_alt = r2 > r1
+        r2_map = np.where(use_alt, r_alt, r1)
+        phase_final = np.where(use_alt, alt_phase, phase)
+
+        magnitudes = np.abs(fft_result[1:])
+        sorted_idx = np.argsort(magnitudes, axis=0)[::-1]
+        dom_map = sorted_idx[0] + 1
+        dom2_idx = sorted_idx[1] + 1
+
+        mag_dom2 = (
+            2
+            * np.take_along_axis(
+                np.abs(fft_result), dom2_idx[None, ...], axis=0
+            )[0]
+            / len(t)
+        )
+        mag_rel_map = np.divide(
+            mag_dom2, a_4, out=np.zeros_like(mag_dom2), where=a_4 != 0
+        )
+
+        r2_thresh = 0.8
+        mag_rel_thresh = 0.12
+        arm_map = np.where(
+            (r2_map > r2_thresh) & (mag_rel_map >= mag_rel_thresh),
+            np.mod(fft_phases[8], 2 * np.pi) / 12,
+            np.nan,
+        )
+        phase_map = np.where(
+            r2_map > r2_thresh, np.degrees(phase_final), np.nan
+        )
+
+        viewer.add_image(
+            phase_map.reshape(h, w), name="Phase Map", colormap="hsv"
+        )
+
         viewer.add_image(r2_map.reshape(h, w), name="R² Map", colormap="magma")
-        viewer.add_image(dom_map.reshape(h, w), name="Dominant Freq", colormap="viridis")
-        viewer.add_image(mag_rel_map.reshape(h, w), name="Rel Magnitude", colormap="plasma")
-        viewer.add_image(arm_map.reshape(h, w), name="Arm Angle", colormap="twilight")
+        viewer.add_image(
+            dom_map.reshape(h, w), name="Dominant Freq", colormap="viridis"
+        )
+        viewer.add_image(
+            mag_rel_map.reshape(h, w), name="Rel Magnitude", colormap="plasma"
+        )
+        viewer.add_image(
+            arm_map.reshape(h, w), name="Arm Angle", colormap="twilight"
+        )
 
     return widget
 
-from magicgui import magicgui
-import numpy as np
-import matplotlib.pyplot as plt
-from napari.types import ImageData
-from napari.viewer import Viewer
+
+import matplotlib.pyplot as plt 
 from .fourier_analysis import analyze_pixel_signal
 
 
@@ -182,13 +239,16 @@ def single_pixel_analysis_widget():
         y={"widget_type": "SpinBox", "min": 0, "max": 512},
         #max_time={"widget_type": "SpinBox", "min": 0, "max": 360, "value": 180},
     )
-    def widget(image: ImageData, x: int = 0, y: int = 0, viewer: Viewer = None):
+    def widget(
+        image: ImageData, x: int = 0, y: int = 0, viewer: Viewer = None
+    ):
         import dask.array as da
-        def theoretical(a_0,a_4,phi,alpha):
-            return a_0 + a_4 * np.cos(2*(3*phi - 2 * alpha) )
 
-        def theoretical2(a_0,a_4,phi,alpha):
-            return a_0 + a_4 * np.cos(2*(3*phi + 2 * alpha))
+        def theoretical(a_0, a_4, phi, alpha):
+            return a_0 + a_4 * np.cos(2 * (3 * phi - 2 * alpha))
+
+        def theoretical2(a_0, a_4, phi, alpha):
+            return a_0 + a_4 * np.cos(2 * (3 * phi + 2 * alpha))
 
         def r_squared(signal, predicted):
             ss_res = np.sum((signal - predicted)**2)
@@ -229,10 +289,13 @@ def single_pixel_analysis_widget():
             fitted = np.zeros_like(signal)
 
         plt.figure()
-        plt.plot(t, signal, 'ko', label='Raw Signal')
-        plt.plot(t, fitted, 'r-', label='Fitted Model')
-        plt.title(f"Pixel ({x},{y}) - Phase: {fft_phase:.2f}°" if fft_phase else "No Fit")
-        plt.xlabel("t (rad)")
+        plt.plot(t, signal, "ko", label="Raw Signal")
+        plt.plot(t, fitted, "r-", label="Fitted Model")
+        plt.title(
+            f"Pixel ({x},{y}) - Phase: {fft_phase:.2f}°"
+            if fft_phase
+            else "No Fit"
+        )
         plt.legend()
         plt.tight_layout()
         plt.show()

@@ -1,11 +1,11 @@
 import numpy as np
 from scipy.fft import rfft
 
-def theoretical(a_0, a_4, phase, t):
-    return a_0 + a_4 * np.cos(2*(2 * t - 3 * phase))
+def theoretical(a_0,a_4,phi,alpha):
+    return a_0 + a_4 * np.cos(2*(3*phi - 2 * alpha) )
 
-def theoretical2(a_0, a_4, phase, t):
-    return a_0 + a_4 * np.cos(2*(2 * t + 3 * phase))
+def theoretical2(a_0,a_4,phi,alpha):
+    return a_0 + a_4 * np.cos(2*(3*phi + 2 * alpha))
 
 def r_squared(observed, predicted):
     ss_res = np.sum((observed - predicted) ** 2)
