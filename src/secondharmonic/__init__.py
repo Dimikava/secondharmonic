@@ -25,6 +25,7 @@ __all__ = (
     "threshold_autogenerate_widget",
     "threshold_magic_widget",
     "fourier_phase_analysis_widget",
+    "export_with_matplotlib_widget",
     "single_pixel_analysis_widget",
 )
 
