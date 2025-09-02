@@ -56,6 +56,8 @@ contributions:
       display_name: Single Pixel Fourier Analysis
     - command: secondharmonic.fourier_phase_analysis
       display_name: Fourier Phase Analysis
+    - command: secondharmonic.export_with_matplotlib_widget
+      display_name: Export with Matplotlib
     - command: secondharmonic.make_container_widget
       display_name: Container Threshold
     - command: secondharmonic.make_magic_widget
