@@ -29,10 +29,11 @@ References:
 Replace code below according to your needs.
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from magicgui import magic_factory
 from magicgui.widgets import CheckBox, Container, create_widget
+from matplotlib.mlab import detrend_mean
 from qtpy.QtWidgets import QHBoxLayout, QPushButton, QWidget
 from skimage.util import img_as_float
 
@@ -128,6 +129,7 @@ class ExampleQWidget(QWidget):
     def _on_click(self):
         print("napari has", len(self.viewer.layers), "layers")
 
+from typing import Optional, Literal
 from magicgui import magicgui
 import numpy as np
 from napari.viewer import Viewer
@@ -135,6 +137,12 @@ from napari.types import ImageData
 from napari.viewer import Viewer
 from scipy.fft import rfft
 from .fourier_analysis import theoretical, theoretical2
+
+def _ensure_layer(viewer: Viewer, name: str, data: np.ndarray, cmap: str, overwrite: bool):
+    
+    if overwrite and name in viewer.layers:
+        viewer.layers.pop(name)
+    viewer.add_image(data, name=name, colormap=cmap)
 
 
 def fourier_phase_analysis_widget():
@@ -144,89 +152,119 @@ def fourier_phase_analysis_widget():
     with a single ``rfft`` call and metrics are derived using NumPy
     broadcasting.
     """
-    @magicgui(call_button="Run Fourier Phase Analysis")
-    def widget(image: ImageData, viewer: Viewer):
+    @magicgui(
+        call_button="Run Fourier Phase Analysis",
+        frame_start={"label": "Frame start", "min": 0, "max": 10_000, "step": 1},
+        frame_stop={"label": "Frame stop (exclusive)", "min": 1, "max": 10_000, "step": 1},
+        use_frame_slice={"label": "Use frame slice"},
+        fft_axis={"label": "FFT axis", "choices": [0, 1, 2]},
+        detrend_mean={"label": "Detrend (remove mean)"},
+        # ---- Time base ----
+        time_span={"label": "Time span (radians)", "min": 0.0, "max": 1000.0, "step": 0.01},
+        custom_time={"label": "Custom time array (comma/space sep)", "widget_type": "LineEdit"},
+        # ---- Harmonics / model ----
+        model_choice={"label": "Model for R²", "choices": ["d3h"]},
+        # ---- Thresholds ----
+        r2_thresh={"label": "R² threshold", "min": 0.0, "max": 1.0, "step": 0.005},
+        # Output / UX
+        layer_prefix={"label": "Layer name prefix"},
+        overwrite_layers={"label": "Overwrite existing layers"},
+    )
+    def run(
+        image: ImageData,
+        viewer: Viewer,
+        # Data / slicing
+        frame_start: int = 0,
+        frame_stop: int = 360,
+        use_frame_slice: bool = True,
+        fft_axis: int = 0,
+        detrend_mean: bool = False,
+        # Time base
+        time_span: float = 2 * np.pi,
+        custom_time: str = "",
+        # Harmonics / model
+        model_choice: Literal["d3h"] = "d3h",
+        # Thresholds
+        r2_thresh: float = 0.8,
+        # Output / UX
+        layer_prefix: str = "",
+        overwrite_layers: bool = True,    
+    ):
         if image.ndim != 3:
             raise ValueError("Expected 3D image: (time, y, x)")
-        image = image[:180]
-        t = np.linspace(0, 2 * np.pi, image.shape[0])
-        h, w = image.shape[1:]
+        
+        T, H, W = image.shape
+        
+        if use_frame_slice:
+            s0 = max(0, min(frame_start, T - 1))
+            s1 = max(s0 + 1, min(frame_stop, T))
+            image = image[s0:s1]
+            T = image.shape[0]
+       
+
         def r_squared_vec(obs: np.ndarray, pred: np.ndarray) -> np.ndarray:
             ss_res = np.sum((obs - pred) ** 2, axis=0)
             ss_tot = np.sum((obs - np.mean(obs, axis=0)) ** 2, axis=0)
             return 1 - ss_res / ss_tot
+       
+        if detrend_mean:
+            image = image - image.mean(axis=0, keepdims=True)
 
+        # ---------- time base ----------
+        if custom_time.strip():
+            parts = custom_time.replace(",", " ").split()
+            t = np.array([float(p) for p in parts], dtype=float)
+            if len(t) != T:
+                raise ValueError(f"Custom time length ({len(t)}) must match number of frames ({T}).")
+        else:
+            t = np.linspace(0.0, time_span, T, endpoint=False)
+        
+        t_arr = t[:, None, None]
+        
         fft_result = rfft(image, axis=0)
         fft_phases = np.angle(fft_result)
+        if model_choice == "d3h":
+            a_0 = np.abs(fft_result[0]) / len(t)
+            a_4 = 2 * np.abs(fft_result[4]) / len(t)
+            phase = np.mod(fft_phases[4], 2 * np.pi) / 6
 
-        a_0 = np.abs(fft_result[0]) / len(t)
-        a_4 = 2 * np.abs(fft_result[4]) / len(t)
-        phase = np.mod(fft_phases[4], 2 * np.pi) / 6
-        t_arr = t[:, None, None]
 
-        fit1 = theoretical(
-            a_0[None, ...], a_4[None, ...], phase[None, ...], t_arr
-        )
-        r1 = r_squared_vec(image, fit1)
-        fit2 = theoretical2(
-            a_0[None, ...], a_4[None, ...], phase[None, ...], t_arr
-        )
-        r2 = r_squared_vec(image, fit2)
+            fit1 = theoretical(
+                a_0[None, ...], a_4[None, ...], phase[None, ...], t_arr
+            )
+            r1 = r_squared_vec(image, fit1)
+            fit2 = theoretical2(
+                a_0[None, ...], a_4[None, ...], phase[None, ...], t_arr
+            )
+            r2 = r_squared_vec(image, fit2)
 
-        alt_phase = np.abs(np.mod(fft_phases[4], 2 * np.pi) - 2 * np.pi) / 6
-        fit_alt = theoretical(
-            a_0[None, ...], a_4[None, ...], alt_phase[None, ...], t_arr
-        )
-        r_alt = r_squared_vec(image, fit_alt)
+            alt_phase = np.abs(np.mod(fft_phases[4], 2 * np.pi) - 2 * np.pi) / 6
+            fit_alt = theoretical(
+                a_0[None, ...], a_4[None, ...], alt_phase[None, ...], t_arr
+            )
+            r_alt = r_squared_vec(image, fit_alt)
 
-        use_alt = r2 > r1
-        r2_map = np.where(use_alt, r_alt, r1)
-        phase_final = np.where(use_alt, alt_phase, phase)
+            use_alt = r2 > r1
+            r2_map = np.where(use_alt, r_alt, r1)
+            phase_final = np.where(use_alt, alt_phase, phase)
+        else:
+            raise ValueError(f"Unknown model choice: {model_choice}")
 
-        magnitudes = np.abs(fft_result[1:])
-        sorted_idx = np.argsort(magnitudes, axis=0)[::-1]
-        dom_map = sorted_idx[0] + 1
-        dom2_idx = sorted_idx[1] + 1
-
-        mag_dom2 = (
-            2
-            * np.take_along_axis(
-                np.abs(fft_result), dom2_idx[None, ...], axis=0
-            )[0]
-            / len(t)
-        )
-        mag_rel_map = np.divide(
-            mag_dom2, a_4, out=np.zeros_like(mag_dom2), where=a_4 != 0
-        )
-
-        r2_thresh = 0.8
-        mag_rel_thresh = 0.12
-        arm_map = np.where(
-            (r2_map > r2_thresh) & (mag_rel_map >= mag_rel_thresh),
-            np.mod(fft_phases[8], 2 * np.pi) / 12,
-            np.nan,
-        )
         phase_map = np.where(
             r2_map > r2_thresh, np.degrees(phase_final), np.nan
         )
+        prefix = (layer_prefix + " ").strip() if layer_prefix else ""
+        _ensure_layer(viewer, f"{prefix}Armchair angle Map", phase_map.reshape(H, W), "magma", overwrite_layers)
+        _ensure_layer(viewer, f"{prefix}R² Map", r2_map.reshape(H, W), "magma", overwrite_layers)
+        return None
 
-        viewer.add_image(
-            phase_map.reshape(h, w), name="Phase Map", colormap="hsv"
-        )
+    return run
 
-        viewer.add_image(r2_map.reshape(h, w), name="R² Map", colormap="magma")
-        viewer.add_image(
-            dom_map.reshape(h, w), name="Dominant Freq", colormap="viridis"
-        )
-        viewer.add_image(
-            mag_rel_map.reshape(h, w), name="Rel Magnitude", colormap="plasma"
-        )
-        viewer.add_image(
-            arm_map.reshape(h, w), name="Arm Angle", colormap="twilight"
-        )
-
-    return widget
-
+def add_fourier_phase_tools_to_viewer(viewer: Viewer):
+    fpw = fourier_phase_analysis_widget()
+    viewer.window.add_dock_widget(fpw, area="right", name="Fourier Phase Analysis")
+    viewer.window.add_dock_widget(export_with_matplotlib, area="right", name="Export with Matplotlib")
+    return fpw
 
 import matplotlib.pyplot as plt 
 from .fourier_analysis import analyze_pixel_signal
