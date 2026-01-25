@@ -30,6 +30,8 @@ dependencies = [
     "qtpy",
     "scikit-image",
     "matplotlib",
+    "scipy",
+    "dask",
 ]
 
 [project.optional-dependencies]
