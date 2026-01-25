@@ -2,7 +2,7 @@
 This module contains the Fourier analysis widgets for the secondharmonic plugin.
 """
 
-from __future__ import annotations
+
 from typing import TYPE_CHECKING, Literal
 
 from magicgui import magic_factory, magicgui
