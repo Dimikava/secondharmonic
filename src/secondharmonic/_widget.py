@@ -14,10 +14,9 @@ import matplotlib.pyplot as plt
 from scipy.fft import rfft
 import dask.array as da
 
-if TYPE_CHECKING:
-    import napari
-    from napari.types import ImageData
-    from napari.viewer import Viewer
+import napari
+from napari.types import ImageData
+from napari.viewer import Viewer
 
 from .fourier_analysis import theoretical, theoretical2, analyze_pixel_signal
 
